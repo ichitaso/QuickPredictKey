@@ -1,0 +1,16 @@
+Author: ichitaso
+Maintainer: ichitaso
+Name: QuickPredictKey
+Package: com.ichitaso.quickpredict
+Pre-Depends: firmware (>= 11.0)
+Depends: mobilesubstrate
+Conflicts:
+Replaces: 
+Section: Tweaks
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: Easily switch between Predict keyboards
+Depiction: https://cydia.ichitaso.com/depiction/quickpredict.html
+Homepage: https://ichitaso.com/
+dev: ichitaso
+Tag: purpose::extension, compatible::ios12, compatible::ios13
