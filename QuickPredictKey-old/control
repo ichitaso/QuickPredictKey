@@ -3,11 +3,11 @@ Maintainer: ichitaso
 Name: QuickPredictKey
 Package: com.ichitaso.quickpredict
 Pre-Depends: firmware (>= 11.0)
-Depends: mobilesubstrate, preferenceloader
+Depends: mobilesubstrate, com.rpetrich.rocketbootstrap
 Conflicts:
 Replaces: 
 Section: Tweaks
-Version: 0.0.3
+Version: 0.0.2
 Architecture: iphoneos-arm
 Description: Easily switch between Predict keyboards
 Depiction: https://cydia.ichitaso.com/depiction/quickpredict.html

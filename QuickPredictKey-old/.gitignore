@@ -1,0 +1,13 @@
+*.o
+.theos/*
+debs/*
+*.deb
+*.dylib
+**/.theos/*
+*/.theos/*
+*.sublime-workspace
+_/*
+*/obj/*
+obj/*
+*.zip
+simulator

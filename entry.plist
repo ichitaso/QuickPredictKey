@@ -1,0 +1,10 @@
+{
+    entry = {
+	bundle = QuickPredictKeySettings;
+	cell = PSLinkCell;
+	detail = QuickPredictKeySettingsController;
+	icon = icon.png;
+	isController = 1;
+	label = QuickPredictKey;
+    };
+}
