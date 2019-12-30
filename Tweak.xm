@@ -1,7 +1,23 @@
+// QuickPredictKey
+// Triple-click the shift key to toggle the Predictive Keyboard.
+// MIT License
+// Create by @ichitaso
+
+// It doesn't work completely in iOS 13. It needs improvement.
+
 #import <firmware.h>
+#import <AppSupport/CPDistributedMessagingCenter.h>
+#import <rocketbootstrap/rocketbootstrap.h>
+
+#define PREF_PATH @"/var/mobile/Library/Preferences/com.ichitaso.quickpredict.plist"
 
 #define NOTIFY_ALEART "com.ichitaso.quickpredict.showalert"
 #define NOTIFY_NAME @"com.ichitaso.quickpredict.springboard"
+
+// https://iphonedevwiki.net/index.php/UIKeyboardPreferencesController
+// Reference https://github.com/PoomSmart/Predictive-Keyboard-Flipswitch
+#define KeyboardPrediction "KeyboardPrediction"
+#define KeyboardShowPredictionBar "KeyboardShowPredictionBar"
 
 @interface UIKeyboardLayoutStar
 - (id)keyHitTest:(CGPoint)arg1;
@@ -13,14 +29,25 @@
 - (void)showKeyboard;
 - (void)hideKeyboard;
 - (void)updateLayout;
+- (BOOL)accessibilityUsesExtendedKeyboardPredictionsEnabled;//iOS 13
 @end
 
-@interface UIKeyboardCache
-+ (id)sharedInstance;
-- (void)purge;
+@interface TIPreferencesController : NSObject
++ (id)sharedPreferencesController;
+- (void)setValue:(id)arg1 forKey:(int)arg2;
+- (id)valueForKey:(int)arg1;
+- (void)setValue:(id)arg1 forPreferenceKey:(id)arg2;
+- (void)synchronizePreferences;
 @end
 
-static BOOL isOn;
+static BOOL togglePredict;
+static BOOL predictStatus;
+
+static void predictChanged(NSDictionary *dict) {
+    CPDistributedMessagingCenter *c = [CPDistributedMessagingCenter centerNamed:@"com.ichitaso.quickpredict"];
+    rocketbootstrap_distributedmessagingcenter_apply(c);
+    [c sendMessageName:@"QuickPredictKey" userInfo:dict];
+}
 
 %hook UIKeyboardLayoutStar
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
@@ -35,7 +62,7 @@ static BOOL isOn;
                 // Hide Keyboard
                 [[%c(UIKeyboardImpl) sharedInstance] hideKeyboard];
                 // Toggle status
-                isOn = !isOn;
+                togglePredict = !togglePredict;
                 // Send Notification
                 CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFSTR(NOTIFY_ALEART), NULL, NULL, true);
             }
@@ -47,29 +74,60 @@ static BOOL isOn;
 %hook UIKeyboardImpl
 %group iOS_13
 - (BOOL)accessibilityUsesExtendedKeyboardPredictionsEnabled {
-    if (isOn) {
+    if (togglePredict) {
         return YES;
     }
     return %orig;
 }
 %end
-
+//- (BOOL)shouldShowCandidateBarIfReceivedCandidatesInCurrentInputMode:(BOOL)arg1 ignoreHidePredictionTrait:(BOOL)arg2 { // No display but bar is visible
+//    if (togglePredict) {
+//        return YES;
+//    }
+//    return NO;
+//}
 %group iOS_12
+- (BOOL)predictionFromPreference { // iPhone X Serise
+    if (togglePredict) {
+        return YES;
+    }
+    return %orig;
+}
+
 - (BOOL)canOfferPredictionsForTraits {
-    if (isOn) {
+    if (togglePredict) {
         return YES;
     }
     return NO;
 }
  
 - (BOOL)predictionForTraitsWithForceEnable:(BOOL)arg1 {
-    if (isOn) {
+    if (togglePredict) {
         return YES;
     }
     return NO;
 }
 %end
 %end
+
+//%group iOS_13
+//%hook TIPreferencesController
+//- (id)valueForKey:(int)arg1 {
+//    NSLog(@"valueForKey:%@ %d",%orig,arg1);
+//    return %orig;
+//}
+//- (BOOL)predictionEnabled {
+//    if (!togglePredict) {
+//        return NO;
+//    }
+//    return %orig;
+//}
+//- (void)setValue:(id)arg1 forPreferenceKey:(id)arg2 {
+//    NSLog(@"setValue:%@ forPreferenceKey:%@",arg1,arg2);
+//    %orig;
+//}
+//%end
+//%end
 
 %group SpringBoard
 %hook SpringBoard
@@ -77,12 +135,33 @@ static BOOL isOn;
     %orig;
     
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(showAlertView:) name:NOTIFY_NAME object:nil];
+    
+    CPDistributedMessagingCenter *msgCenter = [%c(CPDistributedMessagingCenter) centerNamed:@"com.ichitaso.quickpredict"];
+    rocketbootstrap_distributedmessagingcenter_apply(msgCenter);
+    [msgCenter runServerOnCurrentThread];
+    [msgCenter registerForMessageName:@"QuickPredictKey" target:self selector:@selector(predictKeyChanged:withUserInfo:)];
 }
 %new
 - (void)showAlertView:(NSNotification *)notification {
     NSString *title = nil;
+    
+    if (kCFCoreFoundationVersionNumber >= kCFCoreFoundationVersionNumber_iOS_13_0) {
+        TIPreferencesController *tc = [%c(TIPreferencesController) sharedPreferencesController];
+        if ([[tc valueForKey:34] boolValue]) { // KeyboardShowPredictionBar
+            title = @"Enabled";
+        } else {
+            title = @"Disabled";
+        }
+    } else {
+        if (predictStatus) {
+            title = @"Enabled";
+        } else {
+            title = @"Disabled";
+        }
+    }
+    
     NSNumber *status = notification.userInfo[@"status"];
-    //NSLog(@"[status boolValue]:%d",[status boolValue]);
+    NSLog(@"togglePredict:%d",[status boolValue]);
     if ([status boolValue]) {
         title = @"Enabled";
     } else {
@@ -90,7 +169,7 @@ static BOOL isOn;
     }
     
     UIAlertController *alert =
-    [UIAlertController alertControllerWithTitle:@"Predict keyboards"
+    [UIAlertController alertControllerWithTitle:@"Predictive Keyboard"
                                         message:title
                                  preferredStyle:UIAlertControllerStyleAlert];
     
@@ -105,17 +184,48 @@ static BOOL isOn;
     
     [vc presentViewController:alert animated:YES completion:nil];
 }
+%new
+- (void)predictKeyChanged:(NSString *)name withUserInfo:(NSDictionary *)d {
+    if ([name isEqualToString:@"QuickPredictKey"]) {
+        NSNumber *status = d[@"status"];
+        
+        predictStatus = [status boolValue];
+        //NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:PREF_PATH];
+        //NSMutableDictionary *mutableDict = dict ? [dict mutableCopy] : [NSMutableDictionary dictionary];
+        //[mutableDict setValue:@(togglePredict) forKey:@"togglePredict"];
+        //[mutableDict writeToFile:PREF_PATH atomically:NO];
+    }
+}
 %end
 %end
 
 static void showAlertNotification(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    
+    if (kCFCoreFoundationVersionNumber >= kCFCoreFoundationVersionNumber_iOS_13_0) {
+        TIPreferencesController *tc = [%c(TIPreferencesController) sharedPreferencesController];
+        if ([[tc valueForKey:35] boolValue]) { // KeyboardPrediction //Memo: !togglePredict
+            [tc setValue:@(NO) forPreferenceKey:@(KeyboardPrediction)];
+            [tc setValue:@(NO) forPreferenceKey:@(KeyboardShowPredictionBar)];
+        } else {
+            [tc setValue:@(YES) forPreferenceKey:@(KeyboardPrediction)];
+            [tc setValue:@(YES) forPreferenceKey:@(KeyboardShowPredictionBar)];
+        }
+        [tc synchronizePreferences];
+    }
+    
+    // Set boolValue
+    NSDictionary *info = togglePredict ? @{@"status": @YES} : @{@"status": @NO};
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.002 * NSEC_PER_SEC), dispatch_get_main_queue(), ^(void) {
+        // Send SpringBoard Notification
+        predictChanged(info);
+    });
+
     double delayInSeconds = 0.5;
     dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
     dispatch_after(popTime, dispatch_get_main_queue(), ^(void) {
         // Keyboard relayout
         [[%c(UIKeyboardImpl) sharedInstance] updateLayout];
-        // Set boolValue
-        NSDictionary *info = isOn ? @{@"status": @YES} : @{@"status": @NO};
         // Send Alert Notification
         [[NSNotificationCenter defaultCenter] postNotificationName:NOTIFY_NAME object:nil userInfo:info];
         // Show Keyboard
@@ -125,6 +235,29 @@ static void showAlertNotification(CFNotificationCenterRef center, void *observer
 
 %ctor {
     @autoreleasepool {
+        BOOL shouldLoad = NO;
+        NSArray *args = [[NSClassFromString(@"NSProcessInfo") processInfo] arguments];
+        NSUInteger count = args.count;
+        if (count != 0) {
+            NSString *executablePath = args[0];
+            if (executablePath) {
+                NSString *processName = [executablePath lastPathComponent];
+                BOOL isSpringBoard = [processName isEqualToString:@"SpringBoard"];
+                BOOL isApplication = [executablePath rangeOfString:@"/Application/"].location != NSNotFound || [executablePath rangeOfString:@"/Applications/"].location != NSNotFound;
+                BOOL isFileProvider = [[processName lowercaseString] rangeOfString:@"fileprovider"].location != NSNotFound;
+                BOOL skip = [processName isEqualToString:@"AdSheet"]
+                         || [processName isEqualToString:@"CoreAuthUI"]
+                         || [processName isEqualToString:@"InCallService"]
+                         || [processName isEqualToString:@"MessagesNotificationViewService"]
+                         || [executablePath rangeOfString:@".appex/"].location != NSNotFound;
+                if (!isFileProvider && (isSpringBoard || isApplication) && !skip) {
+                    shouldLoad = YES;
+                }
+            }
+        }
+
+        if (!shouldLoad) return;
+        
         %init;
         
         NSString *identifier = [[NSBundle mainBundle] bundleIdentifier];
